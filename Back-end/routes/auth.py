@@ -1,11 +1,12 @@
-<<<<<<< HEAD
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
-from app import database, models, schemas, auth as auth_utils
+import database, models, schemas, auth_utils
 import face_recognition
 import numpy as np
 import io
 import json
+import schemas
+import auth_utils
 
 router = APIRouter(
     prefix="/auth",
@@ -93,72 +94,36 @@ async def login_face(face_image: UploadFile = File(...), db: Session = Depends(g
     users = db.query(models.User).filter(models.User.face_encoding.isnot(None)).all()
     for user in users:
         known_encoding = np.array(json.loads(user.face_encoding))
-        match = face_recognition.compare_faces([known_encoding], input_encoding)[0]
+        match = face_recognition.compare_faces([known_encoding], input_encoding, tolerance=0.45)[0]
         if match:
             token = auth_utils.create_access_token({"sub": user.email})
             return {"access_token": token}
     raise HTTPException(status_code=401, detail="Rosto não reconhecido")
-=======
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from jose import jwt
-from passlib.context import CryptContext
-from schemas import RegisterSchema, LoginSchema, UserResponseSchema
-from models.user import User
-from database import get_db
-import os
-from dotenv import load_dotenv
 
-# Carregar variáveis de ambiente
-load_dotenv()
+# Nova rota para buscar dados do usuário logado
+@router.get("/users/me", response_model=schemas.UserOut)
+async def read_users_me(current_user: models.User = Depends(auth_utils.get_current_user)):
+    """
+    Retorna os dados do usuário autenticado.
+    """
+    return current_user
 
-SECRET_KEY = os.getenv("SECRET_KEY")
-ALGORITHM = "HS256"
-if not SECRET_KEY:
-    raise ValueError("SECRET_KEY não configurada!")
 
-router = APIRouter()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+@router.put("/users/me", response_model=schemas.UserOut) # Ou PATCH se preferir atualizações parciais
+async def update_user_me(
+    user_update_data: schemas.UserUpdate, # Dados para atualização
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user) # Usuário autenticado
+):
+    # Pega os dados do Pydantic model que foram enviados (excluindo os não definidos)
+    update_data = user_update_data.model_dump(exclude_unset=True) # .dict() para Pydantic v1
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_password_hash(password):
-    return pwd_context.hash(password)
-
-@router.post("/register", response_model=UserResponseSchema)
-def register_user(data: RegisterSchema, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == data.email).first()
-    if user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email já cadastrado."
-        )
+    for key, value in update_data.items():
+        setattr(current_user, key, value) # Define o atributo no objeto do usuário do SQLAlchemy
     
-    hashed_password = get_password_hash(data.password)
-    new_user = User(
-        first_name=data.first_name,
-        last_name=data.last_name,
-        email=data.email,
-        hashed_password=hashed_password,
-        country=data.country,
-        agree_to_terms=data.agree_to_terms,
-    )
-    db.add(new_user)
+    db.add(current_user)
     db.commit()
-    db.refresh(new_user)
-    return new_user
-
-@router.post("/login")
-def login_user(data: LoginSchema, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == data.email).first()
-    if not user or not verify_password(data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Credenciais inválidas."
-        )
+    db.refresh(current_user)
     
-    # Gerar token JWT
-    token = jwt.encode({"sub": user.email}, SECRET_KEY, algorithm=ALGORITHM)
-    return {"access_token": token, "token_type": "bearer"}
->>>>>>> b61f4638d4934fce659e8ebce08f9e0e46ba6d16
+    return current_user
+

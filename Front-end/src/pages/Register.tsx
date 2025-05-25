@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useNavigate } from "react-router-dom";
-import { ShieldCheck, Globe, Camera } from "lucide-react";
+import { ShieldCheck, Globe, Camera, Eye, EyeOff } from "lucide-react"; // Eye e EyeOff adicionados
 import {
   Form,
   FormControl,
@@ -40,7 +40,9 @@ const Register = () => {
   const [cameraError, setCameraError] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
   const [capturing, setCapturing] = useState(false);
-  const [pendingFormValues, setPendingFormValues] = useState<RegisterFormValues | null>(null);
+  const [pendingFormValues, setPendingFormValues] =
+    useState<RegisterFormValues | null>(null);
+  const [showPassword, setShowPassword] = useState(false); // Estado para visibilidade da senha
 
   const registerForm = useForm<RegisterFormValues>({
     resolver: zodResolver(registerSchema),
@@ -59,26 +61,27 @@ const Register = () => {
     try {
       setFormError("");
 
+      // Os nomes dos campos aqui (first_name, last_name, agree_to_terms)
+      // devem corresponder ao que seu backend espera no schema Pydantic.
+      // Se o backend espera camelCase (ex: firstName) e usa aliases no Pydantic,
+      // então envie em camelCase. Caso contrário, snake_case é o padrão Python.
       const dataToSend = {
-        firstName: values.firstName,
-        lastName: values.lastName,
+        first_name: values.firstName,
+        last_name: values.lastName,
         email: values.email,
         password: values.password,
         country: values.country,
-        agreeToTerms: values.agreeToTerms,
+        agree_to_terms: values.agreeToTerms,
       };
 
-      const response = await axios.post(
-        "http://localhost:8000/register",
-        dataToSend,
-        {
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      await axios.post("http://localhost:8000/auth/register", dataToSend, {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
 
-      // Simulação de criação de perfil de usuário
+      // A criação de perfil local após o registro pode ser opcional
+      // se você for redirecionar para o login e o AuthContext cuidar de buscar o perfil.
       const userProfile = {
         name: `${values.firstName} ${values.lastName}`,
         email: values.email,
@@ -89,23 +92,26 @@ const Register = () => {
         avatar: "",
         skills: ["Segurança Digital"],
       };
-
       localStorage.setItem("userProfile", JSON.stringify(userProfile));
-      localStorage.setItem("userEmail", values.email);
+      localStorage.setItem("userEmail", values.email); // Também opcional com AuthContext
 
       toast({
         title: "Cadastro realizado com sucesso!",
-        description: "Bem-vindo ao Aegis Security.",
+        description: "Bem-vindo ao Aegis Security. Faça login para continuar.",
       });
 
-      navigate("/welcome");
-    } catch (error) {
+      navigate("/login"); // Redireciona para login após cadastro
+    } catch (error: any) {
+      // Especificar 'any' ou um tipo de erro mais específico
+      console.error("Erro ao fazer cadastro:", error);
+      const detail = error?.response?.data?.detail;
       setFormError(
-        "Erro ao fazer cadastro. Verifique seus dados e tente novamente."
+        detail ||
+          "Erro ao fazer cadastro. Verifique seus dados e tente novamente."
       );
       toast({
         title: "Erro ao fazer cadastro",
-        description: "Verifique seus dados e tente novamente.",
+        description: detail || "Verifique seus dados e tente novamente.",
         variant: "destructive",
       });
     }
@@ -159,28 +165,29 @@ const Register = () => {
         formData.append("email", pendingFormValues.email);
         formData.append("password", pendingFormValues.password);
         formData.append("country", pendingFormValues.country);
-        formData.append("agree_to_terms", String(pendingFormValues.agreeToTerms));
+        formData.append(
+          "agree_to_terms",
+          String(pendingFormValues.agreeToTerms)
+        );
         formData.append("face_image", blob, "face.jpg");
 
-        const response = await axios.post(
-          "http://localhost:8000/register-face",
-          formData,
-          { headers: { "Content-Type": "multipart/form-data" } }
-        );
+        await axios.post("http://localhost:8000/auth/register-face", formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
 
         toast({
           title: "Cadastro facial realizado com sucesso!",
-          description: "Bem-vindo ao Aegis Security.",
+          description:
+            "Bem-vindo ao Aegis Security. Faça login para continuar.",
         });
         stopCamera();
-        navigate("/welcome");
+        navigate("/login"); // Redireciona para login após cadastro
       } catch (error: any) {
+        // Especificar 'any' ou um tipo de erro mais específico
+        const detail = error?.response?.data?.detail;
         toast({
           title: "Erro no cadastro facial",
-          description:
-            error?.response?.data?.detail ||
-            error.message ||
-            "Erro desconhecido",
+          description: detail || error.message || "Erro desconhecido",
           variant: "destructive",
         });
         stopCamera();
@@ -220,7 +227,8 @@ const Register = () => {
         </div>
         <h1 className="text-2xl font-medium text-white mb-2">Cadastro Aegis</h1>
         <p className="text-white/60 text-center mb-8 text-sm">
-          Registre-se para ter seus dados protegidos pela tecnologia Aegis Security
+          Registre-se para ter seus dados protegidos pela tecnologia Aegis
+          Security
         </p>
         {formError && (
           <div className="w-full bg-red-500/20 border border-red-500/50 rounded-md p-3 mb-4">
@@ -327,6 +335,7 @@ const Register = () => {
                     </FormItem>
                   )}
                 />
+                {/* CAMPO DE SENHA MODIFICADO */}
                 <FormField
                   control={registerForm.control}
                   name="password"
@@ -335,34 +344,24 @@ const Register = () => {
                       <FormControl>
                         <div className="relative">
                           <Input
-                            type="password"
+                            type={showPassword ? "text" : "password"} // Tipo dinâmico
                             placeholder="Senha"
-                            className="bg-white/5 border-white/10 text-white h-12 rounded-md pr-10"
+                            className="bg-white/5 border-white/10 text-white h-12 rounded-md pr-10" // Espaço para o ícone
                             {...field}
                           />
-                          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-white/30">
+                          <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
                             <Button
                               variant="ghost"
-                              type="button"
+                              type="button" // Previne submit do formulário
                               size="icon"
-                              className="h-6 w-6"
+                              className="h-8 w-8 text-white/70 hover:text-white focus-visible:ring-0 focus-visible:ring-offset-0"
+                              onClick={() => setShowPassword(!showPassword)} // Alterna visibilidade
                             >
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="16"
-                                height="16"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"></path>
-                                <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"></path>
-                                <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"></path>
-                                <line x1="2" x2="22" y1="2" y2="22"></line>
-                              </svg>
+                              {showPassword ? (
+                                <EyeOff size={18} /> // Ícone para ocultar
+                              ) : (
+                                <Eye size={18} /> // Ícone para mostrar
+                              )}
                             </Button>
                           </div>
                         </div>
@@ -371,6 +370,7 @@ const Register = () => {
                     </FormItem>
                   )}
                 />
+                {/* FIM DO CAMPO DE SENHA MODIFICADO */}
                 <FormField
                   control={registerForm.control}
                   name="country"
